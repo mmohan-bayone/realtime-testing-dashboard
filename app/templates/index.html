@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QA Real-Time Testing Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>Real-Time Testing Dashboard</h1>
+        <p>Open-source QA observability dashboard for live execution monitoring</p>
+      </div>
+      <div class="pill" id="connection-status">Connecting…</div>
+    </header>
+
+    <section class="kpi-grid" id="kpis"></section>
+
+    <section class="grid two">
+      <article class="card">
+        <div class="card-title">Execution Status</div>
+        <div id="status-breakdown"></div>
+      </article>
+      <article class="card">
+        <div class="card-title">Environment Distribution</div>
+        <div id="environment-breakdown"></div>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="card">
+        <div class="card-title">Module Quality Trend</div>
+        <div id="module-quality"></div>
+      </article>
+      <article class="card">
+        <div class="card-title">Live Execution Feed</div>
+        <div id="activity-meta" class="meta"></div>
+        <table>
+          <thead>
+            <tr>
+              <th>Suite</th>
+              <th>Build</th>
+              <th>Env</th>
+              <th>Status</th>
+              <th>Progress</th>
+            </tr>
+          </thead>
+          <tbody id="runs-table"></tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="card control-panel">
+      <div class="card-title">Demo Controls</div>
+      <p>Inject a sample run to demonstrate real-time streaming to the dashboard.</p>
+      <button id="seed-run">Create Demo Test Run</button>
+    </section>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

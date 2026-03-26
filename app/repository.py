@@ -1,0 +1,160 @@
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import case, func
+from sqlalchemy.orm import Session, joinedload
+
+from .models import TestCaseResult, TestRun
+
+FINAL_STATUSES = {'PASSED', 'FAILED', 'BLOCKED', 'SKIPPED'}
+
+
+def create_run(db: Session, payload):
+    run = TestRun(
+        suite_name=payload.suite_name,
+        environment=payload.environment,
+        build_version=payload.build_version,
+        status='RUNNING',
+    )
+    db.add(run)
+    db.flush()
+
+    for tc in payload.test_cases:
+        db.add(
+            TestCaseResult(
+                run_id=run.id,
+                name=tc.name,
+                module=tc.module,
+                status=tc.status,
+                duration_ms=tc.duration_ms,
+                defect_id=tc.defect_id,
+            )
+        )
+
+    db.commit()
+    db.refresh(run)
+    return get_run(db, run.id)
+
+
+def get_run(db: Session, run_id: int):
+    return (
+        db.query(TestRun)
+        .options(joinedload(TestRun.test_cases))
+        .filter(TestRun.id == run_id)
+        .first()
+    )
+
+
+def get_runs(db: Session, limit: int = 10):
+    return (
+        db.query(TestRun)
+        .options(joinedload(TestRun.test_cases))
+        .order_by(TestRun.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def update_case_status(db: Session, case_id: int, status: str, duration_ms: Optional[int] = None, defect_id: Optional[str] = None):
+    case = db.query(TestCaseResult).filter(TestCaseResult.id == case_id).first()
+    if not case:
+        return None
+    case.status = status
+    case.updated_at = datetime.utcnow()
+    if duration_ms is not None:
+        case.duration_ms = duration_ms
+    if defect_id is not None:
+        case.defect_id = defect_id
+    db.commit()
+    run = get_run(db, case.run_id)
+    _recompute_run_status(db, run)
+    return get_run(db, case.run_id)
+
+
+def _recompute_run_status(db: Session, run: TestRun):
+    statuses = [tc.status for tc in run.test_cases]
+    if statuses and all(s in FINAL_STATUSES for s in statuses):
+        if any(s == 'FAILED' for s in statuses):
+            run.status = 'FAILED'
+        elif any(s == 'BLOCKED' for s in statuses):
+            run.status = 'BLOCKED'
+        else:
+            run.status = 'PASSED'
+        if run.completed_at is None:
+            run.completed_at = datetime.utcnow()
+    else:
+        run.status = 'RUNNING'
+        run.completed_at = None
+    db.commit()
+
+
+def get_summary(db: Session):
+    total_runs = db.query(func.count(TestRun.id)).scalar() or 0
+    total_cases = db.query(func.count(TestCaseResult.id)).scalar() or 0
+
+    status_counts = {
+        status: count
+        for status, count in db.query(TestCaseResult.status, func.count(TestCaseResult.id)).group_by(TestCaseResult.status).all()
+    }
+
+    environment_counts = {
+        env: count
+        for env, count in db.query(TestRun.environment, func.count(TestRun.id)).group_by(TestRun.environment).all()
+    }
+
+    modules = (
+        db.query(
+            TestCaseResult.module,
+            func.sum(case((TestCaseResult.status == 'PASSED', 1), else_=0)),
+            func.sum(case((TestCaseResult.status == 'FAILED', 1), else_=0)),
+            func.count(TestCaseResult.id),
+        )
+        .group_by(TestCaseResult.module)
+        .all()
+    )
+
+    module_quality = [
+        {
+            'module': module,
+            'passed': int(passed or 0),
+            'failed': int(failed or 0),
+            'total': int(total or 0),
+            'pass_rate': round((int(passed or 0) / total) * 100, 1) if total else 0,
+        }
+        for module, passed, failed, total in modules
+    ]
+
+    latest_runs = []
+    for run in get_runs(db, limit=6):
+        passed = len([tc for tc in run.test_cases if tc.status == 'PASSED'])
+        failed = len([tc for tc in run.test_cases if tc.status == 'FAILED'])
+        latest_runs.append(
+            {
+                'id': run.id,
+                'suite_name': run.suite_name,
+                'environment': run.environment,
+                'build_version': run.build_version,
+                'status': run.status,
+                'started_at': run.started_at.isoformat(),
+                'completed_at': run.completed_at.isoformat() if run.completed_at else None,
+                'passed': passed,
+                'failed': failed,
+                'total': len(run.test_cases),
+            }
+        )
+
+    pass_rate = round((status_counts.get('PASSED', 0) / total_cases) * 100, 1) if total_cases else 0
+
+    return {
+        'totals': {
+            'runs': total_runs,
+            'cases': total_cases,
+            'pass_rate': pass_rate,
+            'open_defects': db.query(func.count(TestCaseResult.id)).filter(TestCaseResult.defect_id.is_not(None)).scalar() or 0,
+        },
+        'status_counts': status_counts,
+        'environment_counts': environment_counts,
+        'module_quality': module_quality,
+        'latest_runs': latest_runs,
+        'generated_at': datetime.utcnow().isoformat(),
+    }
