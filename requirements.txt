@@ -2,5 +2,6 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 sqlalchemy==2.0.35
 pydantic==2.9.2
-alembic
-psycopg[binary]
+alembic==1.16.5
+# Use wheel package name (avoids pip parsing issues with extras like psycopg[binary] on some builders)
+psycopg-binary==3.2.13

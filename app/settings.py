@@ -9,3 +9,10 @@ def _parse_csv(value: str) -> List[str]:
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./qa_dashboard.db')
 CORS_ORIGINS = _parse_csv(os.getenv('CORS_ORIGINS', '*'))
 AUTO_CREATE_SCHEMA = os.getenv('AUTO_CREATE_SCHEMA', 'true').lower() == 'true'
+
+# demo: seed script + simulator + UI demo control
+# github: expect CI (GitHub Actions) to POST real results to ingestion endpoint(s)
+DATA_SOURCE = os.getenv('DATA_SOURCE', 'demo').lower()
+
+# Shared secret for CI ingestion. In production, set a strong value.
+GITHUB_ACTIONS_INGEST_TOKEN = os.getenv('GITHUB_ACTIONS_INGEST_TOKEN', '')

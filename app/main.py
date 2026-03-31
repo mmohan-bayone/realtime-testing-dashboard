@@ -1,7 +1,7 @@
 import asyncio
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -11,7 +11,7 @@ from . import repository, schemas
 from .database import Base, engine, get_db, SessionLocal
 from .models import TestCaseResult
 from .realtime import ConnectionManager
-from .settings import AUTO_CREATE_SCHEMA, CORS_ORIGINS
+from .settings import AUTO_CREATE_SCHEMA, CORS_ORIGINS, DATA_SOURCE, GITHUB_ACTIONS_INGEST_TOKEN
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BASE_DIR.parent
@@ -52,6 +52,11 @@ def health():
     return {'status': 'ok'}
 
 
+@app.get('/api/config')
+def config():
+    return {'data_source': DATA_SOURCE}
+
+
 @app.get('/api/summary')
 def summary(db: Session = Depends(get_db)):
     return repository.get_summary(db)
@@ -64,6 +69,8 @@ def runs(limit: int = 10, db: Session = Depends(get_db)):
 
 @app.post('/api/runs', response_model=schemas.TestRunResponse)
 async def create_run(payload: schemas.TestRunCreate, db: Session = Depends(get_db)):
+    if DATA_SOURCE == 'github':
+        raise HTTPException(status_code=403, detail='Disabled in github mode; use ingestion endpoint')
     run = repository.create_run(db, payload)
     await manager.broadcast({'event': 'run_created', 'summary': repository.get_summary(db)})
     return run
@@ -82,6 +89,22 @@ async def update_case(case_id: int, payload: dict, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail='Test case not found')
     await manager.broadcast({'event': 'case_updated', 'summary': repository.get_summary(db), 'run_id': run.id})
     return {'message': 'updated', 'run_id': run.id}
+
+
+@app.post('/api/ingest/github-actions/run', response_model=schemas.TestRunResponse)
+async def ingest_github_actions_run(
+    payload: schemas.TestRunCreate,
+    db: Session = Depends(get_db),
+    x_ingest_token: str = Header('', alias='X-Ingest-Token'),
+):
+    if not GITHUB_ACTIONS_INGEST_TOKEN:
+        raise HTTPException(status_code=503, detail='Ingestion not configured')
+    if x_ingest_token != GITHUB_ACTIONS_INGEST_TOKEN:
+        raise HTTPException(status_code=401, detail='Unauthorized')
+
+    run = repository.create_run(db, payload)
+    await manager.broadcast({'event': 'github_ingest', 'summary': repository.get_summary(db), 'run_id': run.id})
+    return run
 
 
 @app.websocket('/ws')
@@ -125,7 +148,8 @@ async def simulator_loop():
 
 @app.on_event('startup')
 async def start_simulator():
-    asyncio.create_task(simulator_loop())
+    if DATA_SOURCE == 'demo':
+        asyncio.create_task(simulator_loop())
 
 
 @app.get('/{full_path:path}')

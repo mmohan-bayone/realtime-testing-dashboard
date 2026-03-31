@@ -33,6 +33,8 @@ def create_run(db: Session, payload):
 
     db.commit()
     db.refresh(run)
+    run_full = get_run(db, run.id)
+    _recompute_run_status(db, run_full)
     return get_run(db, run.id)
 
 

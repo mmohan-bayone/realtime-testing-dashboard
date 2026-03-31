@@ -63,6 +63,7 @@ function App() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [connectionStatus, setConnectionStatus] = useState('Connecting...')
   const reconnectTimerRef = useRef<number | null>(null)
+  const [dataSource, setDataSource] = useState<string>('unknown')
 
   const loadSummary = useCallback(async () => {
     const response = await fetch(apiUrl('/api/summary'))
@@ -70,9 +71,20 @@ function App() {
     setSummary(data)
   }, [])
 
+  const loadConfig = useCallback(async () => {
+    try {
+      const response = await fetch(apiUrl('/api/config'))
+      const data = (await response.json()) as { data_source?: string }
+      setDataSource(data.data_source ?? 'unknown')
+    } catch {
+      setDataSource('unknown')
+    }
+  }, [])
+
   useEffect(() => {
     void loadSummary()
-  }, [loadSummary])
+    void loadConfig()
+  }, [loadSummary, loadConfig])
 
   useEffect(() => {
     let socket: WebSocket | null = null
@@ -141,7 +153,10 @@ function App() {
           <h1>Real-Time Testing Dashboard</h1>
           <p>Open-source QA observability dashboard for live execution monitoring</p>
         </div>
-        <div className={`pill ${connectionStatus === 'Live' ? 'status-live' : ''}`}>{connectionStatus}</div>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div className="pill">Data: {dataSource}</div>
+          <div className={`pill ${connectionStatus === 'Live' ? 'status-live' : ''}`}>{connectionStatus}</div>
+        </div>
       </header>
 
       <section className="kpi-grid">
@@ -229,11 +244,13 @@ function App() {
         </article>
       </section>
 
-      <section className="card control-panel">
-        <div className="card-title">Demo Controls</div>
-        <p>Inject a sample run to demonstrate real-time streaming to the dashboard.</p>
-        <button onClick={() => void createDemoRun()}>Create Demo Test Run</button>
-      </section>
+      {dataSource !== 'github' ? (
+        <section className="card control-panel">
+          <div className="card-title">Demo Controls</div>
+          <p>Inject a sample run to demonstrate real-time streaming to the dashboard.</p>
+          <button onClick={() => void createDemoRun()}>Create Demo Test Run</button>
+        </section>
+      ) : null}
     </div>
   )
 }

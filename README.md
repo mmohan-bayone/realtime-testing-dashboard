@@ -75,6 +75,8 @@ Backend env vars:
 - `DATABASE_URL` (default: `sqlite:///./qa_dashboard.db`)
 - `CORS_ORIGINS` (comma-separated, example: `http://127.0.0.1:5173`)
 - `AUTO_CREATE_SCHEMA` (`true` for local quick-start; set `false` in production with Alembic)
+- `DATA_SOURCE` (`demo` or `github`)
+- `GITHUB_ACTIONS_INGEST_TOKEN` (required when `DATA_SOURCE=github`)
 
 ## Production-style run (FastAPI serves React build)
 
@@ -109,6 +111,8 @@ When `frontend/dist` exists, FastAPI serves the React app and asset bundle.
 4. Update `CORS_ORIGINS` in Render after frontend deploy:
    - `https://<your-project>.vercel.app`
 
+If Render shows **Deploy failed** during **Build** (exit code 1), open **Logs** for the failed deploy and fix the pip error first — a broken build means the API never runs reliably (curl/GitHub Actions will time out). This repo pins Python in [`runtime.txt`](runtime.txt) and uses a robust [`buildCommand`](render.yaml).
+
 Backend startup command runs migrations before boot:
 
 ```bash
@@ -137,6 +141,59 @@ Run these checks after deploy:
 - Click `Create Demo Test Run`; verify new run appears in the table.
 - Keep the page open and confirm live updates continue via WebSocket.
 - Restart backend in Render and verify data persists (Postgres-backed).
+
+## Real data from GitHub Actions (optional)
+
+Set `DATA_SOURCE=github` on the backend and set a strong `GITHUB_ACTIONS_INGEST_TOKEN`.
+
+In GitHub repo settings, add a secret:
+
+- `DASHBOARD_INGEST_TOKEN`: same value as `GITHUB_ACTIONS_INGEST_TOKEN`
+
+Then add a workflow step to POST results to the dashboard:
+
+```yaml
+name: Tests
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: |
+          # run your tests here and produce results you can map into JSON
+          echo "ok"
+
+      - name: Publish results to dashboard
+        env:
+          DASHBOARD_URL: https://realtime-testing-dashboard-api.onrender.com
+          DASHBOARD_INGEST_TOKEN: ${{ secrets.DASHBOARD_INGEST_TOKEN }}
+        run: |
+          cat > payload.json <<'EOF'
+          {
+            "suite_name": "GitHub Actions CI",
+            "environment": "CI",
+            "build_version": "${{ github.sha }}",
+            "test_cases": [
+              {"name":"Example test 1","module":"CI","status":"PASSED","duration_ms":10},
+              {"name":"Example test 2","module":"CI","status":"FAILED","duration_ms":12,"defect_id":"GH-ISSUE-123"}
+            ]
+          }
+          EOF
+
+          curl -sS -X POST "$DASHBOARD_URL/api/ingest/github-actions/run" \
+            -H "Content-Type: application/json" \
+            -H "X-Ingest-Token: $DASHBOARD_INGEST_TOKEN" \
+            --data-binary @payload.json
+```
+
+Notes:
+- In `DATA_SOURCE=github` mode, the UI demo button is hidden and `POST /api/runs` is disabled; ingestion must go through `/api/ingest/github-actions/run`.
+- You can map your real test framework output into the `test_cases` array (name/module/status/duration/optional defect_id).
 
 ### D) Rollback and recovery
 
