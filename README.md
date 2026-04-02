@@ -194,6 +194,7 @@ jobs:
 Notes:
 - In `DATA_SOURCE=github` mode, the UI demo button is hidden and `POST /api/runs` is disabled; ingestion must go through `/api/ingest/github-actions/run`.
 - You can map your real test framework output into the `test_cases` array (name/module/status/duration/optional defect_id).
+- **Playwright JSON reports** nest tests under `suite.specs[].tests[]` (not only `suite.tests[]`). Use the uploader in [`examples/playwright-report-to-dashboard.mjs`](examples/playwright-report-to-dashboard.mjs), which parses both shapes. If CI logs show `0 test case(s)` but tests ran, copy the latest script into your Playwright repo and re-run the workflow.
 
 ### D) Rollback and recovery
 
