@@ -36,11 +36,25 @@ const pct = (value: number, total: number): number => {
   return Math.round((value / total) * 100)
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? ''
+/** Prefer Vite env; in production builds fall back to the deployed Render API if unset (avoids stale Vercel bundles talking to the wrong host). */
+const DEFAULT_PROD_API = 'https://realtime-testing-dashboard-api.onrender.com'
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ||
+  (import.meta.env.PROD ? DEFAULT_PROD_API : '')
 
 const apiUrl = (path: string): string => {
   if (!API_BASE_URL) return path
   return `${API_BASE_URL}${path}`
+}
+
+async function fetchJson<T>(path: string): Promise<T> {
+  const url = apiUrl(path)
+  const sep = url.includes('?') ? '&' : '?'
+  const response = await fetch(`${url}${sep}_=${Date.now()}`, { cache: 'no-store' })
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText} ${url}`)
+  }
+  return response.json() as Promise<T>
 }
 
 const createDemoPayload = () => {
@@ -66,15 +80,13 @@ function App() {
   const [dataSource, setDataSource] = useState<string>('unknown')
 
   const loadSummary = useCallback(async () => {
-    const response = await fetch(apiUrl('/api/summary'))
-    const data = (await response.json()) as Summary
+    const data = await fetchJson<Summary>('/api/summary')
     setSummary(data)
   }, [])
 
   const loadConfig = useCallback(async () => {
     try {
-      const response = await fetch(apiUrl('/api/config'))
-      const data = (await response.json()) as { data_source?: string }
+      const data = await fetchJson<{ data_source?: string }>('/api/config')
       setDataSource(data.data_source ?? 'unknown')
     } catch {
       setDataSource('unknown')
@@ -85,6 +97,14 @@ function App() {
     void loadSummary()
     void loadConfig()
   }, [loadSummary, loadConfig])
+
+  // If WebSocket cannot stay connected (common on free Render), still refresh summary periodically.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void loadSummary()
+    }, 15000)
+    return () => window.clearInterval(id)
+  }, [loadSummary])
 
   useEffect(() => {
     let socket: WebSocket | null = null
@@ -110,7 +130,7 @@ function App() {
       }
 
       socket.onclose = () => {
-        setConnectionStatus('Reconnecting...')
+        setConnectionStatus('Reconnecting…')
         reconnectTimerRef.current = window.setTimeout(connect, 2000)
       }
     }
@@ -153,8 +173,9 @@ function App() {
           <h1>Real-Time Testing Dashboard</h1>
           <p>Open-source QA observability dashboard for live execution monitoring</p>
         </div>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <div className="pill">Data: {dataSource}</div>
+          <div className="pill" title="REST + WS target">API: {API_BASE_URL || 'same-origin'}</div>
           <div className={`pill ${connectionStatus === 'Live' ? 'status-live' : ''}`}>{connectionStatus}</div>
         </div>
       </header>

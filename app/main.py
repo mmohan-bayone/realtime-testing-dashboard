@@ -109,7 +109,9 @@ async def ingest_github_actions_run(
 
 @app.websocket('/ws')
 async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+    allowed = CORS_ORIGINS if CORS_ORIGINS else ['*']
+    if not await manager.connect(websocket, allowed_origins=allowed):
+        return
     db = SessionLocal()
     try:
         await websocket.send_json({'event': 'initial', 'summary': repository.get_summary(db)})

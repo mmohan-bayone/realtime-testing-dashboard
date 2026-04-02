@@ -5,6 +5,7 @@ from sqlalchemy import case, func
 from sqlalchemy.orm import Session, joinedload
 
 from .models import TestCaseResult, TestRun
+from .settings import DATA_SOURCE
 
 FINAL_STATUSES = {'PASSED', 'FAILED', 'BLOCKED', 'SKIPPED'}
 
@@ -48,13 +49,16 @@ def get_run(db: Session, run_id: int):
 
 
 def get_runs(db: Session, limit: int = 10):
-    return (
-        db.query(TestRun)
-        .options(joinedload(TestRun.test_cases))
-        .order_by(TestRun.started_at.desc())
-        .limit(limit)
-        .all()
-    )
+    q = db.query(TestRun).options(joinedload(TestRun.test_cases))
+    # In github mode, show CI runs first so the feed is not dominated by old seeded rows.
+    if DATA_SOURCE == 'github':
+        q = q.order_by(
+            case((TestRun.environment == 'CI', 0), else_=1),
+            TestRun.started_at.desc(),
+        )
+    else:
+        q = q.order_by(TestRun.started_at.desc())
+    return q.limit(limit).all()
 
 
 def update_case_status(db: Session, case_id: int, status: str, duration_ms: Optional[int] = None, defect_id: Optional[str] = None):

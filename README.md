@@ -122,11 +122,13 @@ alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ### B) Deploy frontend on Vercel
 
 1. Import the `frontend/` directory as a Vercel project.
-2. Set environment variable in Vercel:
+2. Set environment variable in Vercel (optional if you use the committed default):
 
 ```bash
 VITE_API_BASE_URL=https://<your-render-service>.onrender.com
 ```
+
+The frontend includes [`frontend/.env.production`](frontend/.env.production) so production builds default to the Render API URL above—**redeploy Vercel after changing API or data**, or the browser can keep showing an old bundle / cached responses.
 
 3. Build settings:
    - Build command: `npm run build`
@@ -195,6 +197,8 @@ Notes:
 - In `DATA_SOURCE=github` mode, the UI demo button is hidden and `POST /api/runs` is disabled; ingestion must go through `/api/ingest/github-actions/run`.
 - You can map your real test framework output into the `test_cases` array (name/module/status/duration/optional defect_id).
 - **Playwright JSON reports** nest tests under `suite.specs[].tests[]` (not only `suite.tests[]`). Use the uploader in [`examples/playwright-report-to-dashboard.mjs`](examples/playwright-report-to-dashboard.mjs), which parses both shapes. If CI logs show `0 test case(s)` but tests ran, copy the latest script into your Playwright repo and re-run the workflow.
+- With `DATA_SOURCE=github`, the API **lists CI runs first** in the live feed (so old seeded rows do not stay at the top). To remove seeded/demo rows entirely, truncate tables in Postgres (see Render Postgres shell / SQL): `TRUNCATE test_case_results, test_runs RESTART IDENTITY CASCADE;`
+- **WebSocket “Reconnecting”** on Vercel: set `CORS_ORIGINS` to your exact Vercel URL (including `https://`). Redeploy the API after changing it.
 
 ### D) Rollback and recovery
 
