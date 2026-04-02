@@ -6,6 +6,9 @@ services:
     buildCommand: python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt
     startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
+      # Pin Python: 3.14+ may lack binary wheels (e.g. pydantic-core) and fall back to Rust builds that fail on Render.
+      - key: PYTHON_VERSION
+        value: "3.11.9"
       - key: DATABASE_URL
         fromDatabase:
           name: realtime-testing-dashboard-db

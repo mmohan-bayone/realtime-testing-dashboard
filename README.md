@@ -111,7 +111,7 @@ When `frontend/dist` exists, FastAPI serves the React app and asset bundle.
 4. Update `CORS_ORIGINS` in Render after frontend deploy:
    - `https://<your-project>.vercel.app`
 
-If Render shows **Deploy failed** during **Build** (exit code 1), open **Logs** for the failed deploy and fix the pip error first — a broken build means the API never runs reliably (curl/GitHub Actions will time out). This repo pins Python in [`runtime.txt`](runtime.txt) and uses a robust [`buildCommand`](render.yaml).
+If Render shows **Deploy failed** during **Build** (exit code 1), open **Logs** for the failed deploy and fix the pip error first — a broken build means the API never runs reliably (curl/GitHub Actions will time out). This repo pins Python in [`runtime.txt`](runtime.txt) and in [`render.yaml`](render.yaml) (`PYTHON_VERSION`) so the build does not use **Python 3.14+** (missing wheels for `pydantic-core` → Rust/maturin build → fails on Render’s read-only filesystem).
 
 Backend startup command runs migrations before boot:
 
