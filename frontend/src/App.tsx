@@ -36,11 +36,26 @@ const pct = (value: number, total: number): number => {
   return Math.round((value / total) * 100)
 }
 
-/** Prefer Vite env; in production builds fall back to the deployed Render API if unset (avoids stale Vercel bundles talking to the wrong host). */
+/** Prefer Vite env; production static hosts (e.g. Vercel) do not serve /api — always talk to Render unless env points elsewhere. */
 const DEFAULT_PROD_API = 'https://realtime-testing-dashboard-api.onrender.com'
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ||
-  (import.meta.env.PROD ? DEFAULT_PROD_API : '')
+
+function resolveApiBaseUrl(): string {
+  const trimmed = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+  if (import.meta.env.DEV) {
+    return trimmed
+  }
+  // Misconfigured Vercel env often sets API to the site origin; that returns HTML, not JSON, and leaves stale UI.
+  if (trimmed && typeof window !== 'undefined') {
+    const origin = window.location.origin.replace(/\/$/, '')
+    if (trimmed === origin) {
+      return DEFAULT_PROD_API
+    }
+  }
+  if (trimmed) return trimmed
+  return DEFAULT_PROD_API
+}
+
+const API_BASE_URL = resolveApiBaseUrl()
 
 const apiUrl = (path: string): string => {
   if (!API_BASE_URL) return path
@@ -50,9 +65,16 @@ const apiUrl = (path: string): string => {
 async function fetchJson<T>(path: string): Promise<T> {
   const url = apiUrl(path)
   const sep = url.includes('?') ? '&' : '?'
-  const response = await fetch(`${url}${sep}_=${Date.now()}`, { cache: 'no-store' })
+  const response = await fetch(`${url}${sep}_=${Date.now()}`, {
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+  })
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText} ${url}`)
+  }
+  const ct = response.headers.get('content-type') || ''
+  if (!ct.includes('application/json')) {
+    throw new Error(`Expected JSON from API, got ${ct || 'unknown type'}. Check API base URL (must be Render), not the Vercel site. ${url}`)
   }
   return response.json() as Promise<T>
 }
@@ -75,13 +97,21 @@ const createDemoPayload = () => {
 
 function App() {
   const [summary, setSummary] = useState<Summary | null>(null)
+  const [fetchError, setFetchError] = useState<string | null>(null)
   const [connectionStatus, setConnectionStatus] = useState('Connecting...')
   const reconnectTimerRef = useRef<number | null>(null)
   const [dataSource, setDataSource] = useState<string>('unknown')
 
   const loadSummary = useCallback(async () => {
-    const data = await fetchJson<Summary>('/api/summary')
-    setSummary(data)
+    try {
+      const data = await fetchJson<Summary>('/api/summary')
+      setSummary(data)
+      setFetchError(null)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setFetchError(msg)
+      console.error('[dashboard] /api/summary failed', msg)
+    }
   }, [])
 
   const loadConfig = useCallback(async () => {
@@ -162,12 +192,43 @@ function App() {
     [summary],
   )
 
+  if (!summary && fetchError) {
+    return (
+      <div className="container">
+        <header>
+          <h1>Real-Time Testing Dashboard</h1>
+          <p>Could not load summary from the API.</p>
+        </header>
+        <section className="card" style={{ borderColor: 'var(--danger, #c44)' }}>
+          <div className="card-title">Connection error</div>
+          <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fetchError}</pre>
+          <p className="meta">
+            API base in use: <strong>{API_BASE_URL || 'same-origin'}</strong>. For Vercel, set{' '}
+            <code>VITE_API_BASE_URL</code> to your Render API (e.g. {DEFAULT_PROD_API}), or leave it unset.
+          </p>
+          <button type="button" onClick={() => void loadSummary()}>
+            Retry
+          </button>
+        </section>
+      </div>
+    )
+  }
+
   if (!summary) {
     return <div className="container">Loading dashboard...</div>
   }
 
   return (
     <div className="container">
+      {fetchError ? (
+        <section className="card" style={{ marginBottom: 16, borderColor: 'var(--warning, #a83)' }}>
+          <div className="card-title">Refresh failed (showing last loaded data)</div>
+          <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12 }}>{fetchError}</pre>
+          <button type="button" onClick={() => void loadSummary()}>
+            Retry now
+          </button>
+        </section>
+      ) : null}
       <header>
         <div>
           <h1>Real-Time Testing Dashboard</h1>
