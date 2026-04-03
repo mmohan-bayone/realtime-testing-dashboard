@@ -36,18 +36,25 @@ const pct = (value: number, total: number): number => {
   return Math.round((value / total) * 100)
 }
 
-/** Prefer Vite env; production static hosts (e.g. Vercel) do not serve /api — always talk to Render unless env points elsewhere. */
+/** Deployed Render API — not the Vercel static host. */
 const DEFAULT_PROD_API = 'https://realtime-testing-dashboard-api.onrender.com'
 
-function resolveApiBaseUrl(): string {
+/**
+ * Resolve at runtime (not module init) so hostname is always correct.
+ * On *.vercel.app / *.vercel.dev we always use Render — ignores a bad baked VITE_API_BASE_URL.
+ */
+function getApiBaseUrl(): string {
   const trimmed = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
   if (import.meta.env.DEV) {
     return trimmed
   }
-  // Misconfigured Vercel env often sets API to the site origin; that returns HTML, not JSON, and leaves stale UI.
-  if (trimmed && typeof window !== 'undefined') {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname
+    if (host.endsWith('vercel.app') || host.endsWith('vercel.dev')) {
+      return DEFAULT_PROD_API
+    }
     const origin = window.location.origin.replace(/\/$/, '')
-    if (trimmed === origin) {
+    if (trimmed && trimmed === origin) {
       return DEFAULT_PROD_API
     }
   }
@@ -55,11 +62,10 @@ function resolveApiBaseUrl(): string {
   return DEFAULT_PROD_API
 }
 
-const API_BASE_URL = resolveApiBaseUrl()
-
 const apiUrl = (path: string): string => {
-  if (!API_BASE_URL) return path
-  return `${API_BASE_URL}${path}`
+  const base = getApiBaseUrl()
+  if (!base) return path
+  return `${base}${path}`
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -67,7 +73,11 @@ async function fetchJson<T>(path: string): Promise<T> {
   const sep = url.includes('?') ? '&' : '?'
   const response = await fetch(`${url}${sep}_=${Date.now()}`, {
     cache: 'no-store',
-    headers: { Accept: 'application/json' },
+    headers: {
+      Accept: 'application/json',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    },
   })
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText} ${url}`)
@@ -76,7 +86,14 @@ async function fetchJson<T>(path: string): Promise<T> {
   if (!ct.includes('application/json')) {
     throw new Error(`Expected JSON from API, got ${ct || 'unknown type'}. Check API base URL (must be Render), not the Vercel site. ${url}`)
   }
-  return response.json() as Promise<T>
+  const data = (await response.json()) as T
+  if (path.includes('summary') && data && typeof data === 'object') {
+    const s = data as unknown as Summary
+    if (!s.totals || typeof s.totals.runs !== 'number') {
+      throw new Error(`Invalid /api/summary JSON from ${url}`)
+    }
+  }
+  return data
 }
 
 const createDemoPayload = () => {
@@ -140,8 +157,9 @@ function App() {
     let socket: WebSocket | null = null
 
     const connect = () => {
-      if (API_BASE_URL) {
-        const wsUrl = API_BASE_URL.replace(/^http/, 'ws')
+      const base = getApiBaseUrl()
+      if (base) {
+        const wsUrl = base.replace(/^http/, 'ws')
         socket = new WebSocket(`${wsUrl}/ws`)
       } else {
         const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
@@ -203,8 +221,8 @@ function App() {
           <div className="card-title">Connection error</div>
           <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fetchError}</pre>
           <p className="meta">
-            API base in use: <strong>{API_BASE_URL || 'same-origin'}</strong>. For Vercel, set{' '}
-            <code>VITE_API_BASE_URL</code> to your Render API (e.g. {DEFAULT_PROD_API}), or leave it unset.
+            API base in use: <strong>{getApiBaseUrl() || 'same-origin'}</strong>. On Vercel, the app targets{' '}
+            {DEFAULT_PROD_API} automatically; you can remove <code>VITE_API_BASE_URL</code>.
           </p>
           <button type="button" onClick={() => void loadSummary()}>
             Retry
@@ -236,7 +254,7 @@ function App() {
         </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <div className="pill">Data: {dataSource}</div>
-          <div className="pill" title="REST + WS target">API: {API_BASE_URL || 'same-origin'}</div>
+          <div className="pill" title="REST + WS target">API: {getApiBaseUrl() || 'same-origin'}</div>
           <div className={`pill ${connectionStatus === 'Live' ? 'status-live' : ''}`}>{connectionStatus}</div>
         </div>
       </header>
