@@ -40,35 +40,20 @@ const pct = (value: number, total: number): number => {
 const DEFAULT_PROD_API = 'https://realtime-testing-dashboard-api.onrender.com'
 
 /**
- * Resolve at runtime (not module init) so hostname is always correct.
- *
- * IMPORTANT: Check Vercel host *before* `import.meta.env.DEV`. Some Vercel builds have been seen
- * with DEV still true; that made us return '' and fetch relative `/api/summary` → same-origin on
- * vercel.app (static shell), not Render.
+ * Production (`vite build` → `import.meta.env.PROD === true`): never return an empty base — empty
+ * means relative `/api/...` and hits the static host (e.g. vercel.app), not Render.
+ * Do not use `import.meta.env.DEV` for this; some CI/CD bundles have been observed where DEV is
+ * still true and `trimmed` is empty → same-origin bug.
  */
 function getApiBaseUrl(): string {
   const trimmed = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-
-  if (typeof window !== 'undefined') {
-    const host = window.location.hostname
-    if (host.endsWith('vercel.app') || host.endsWith('vercel.dev')) {
-      if (trimmed && trimmed !== window.location.origin.replace(/\/$/, '')) {
-        return trimmed
-      }
-      return DEFAULT_PROD_API
-    }
-    const origin = window.location.origin.replace(/\/$/, '')
-    if (trimmed && trimmed === origin) {
-      return DEFAULT_PROD_API
-    }
-  }
-
-  if (import.meta.env.DEV) {
+  if (!import.meta.env.PROD) {
     return trimmed
   }
-
-  if (trimmed) return trimmed
-  return DEFAULT_PROD_API
+  if (typeof window !== 'undefined' && trimmed && trimmed === window.location.origin.replace(/\/$/, '')) {
+    return DEFAULT_PROD_API
+  }
+  return trimmed || DEFAULT_PROD_API
 }
 
 const apiUrl = (path: string): string => {
