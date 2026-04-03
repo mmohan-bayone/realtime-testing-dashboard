@@ -41,16 +41,20 @@ const DEFAULT_PROD_API = 'https://realtime-testing-dashboard-api.onrender.com'
 
 /**
  * Resolve at runtime (not module init) so hostname is always correct.
- * On *.vercel.app / *.vercel.dev we always use Render — ignores a bad baked VITE_API_BASE_URL.
+ *
+ * IMPORTANT: Check Vercel host *before* `import.meta.env.DEV`. Some Vercel builds have been seen
+ * with DEV still true; that made us return '' and fetch relative `/api/summary` → same-origin on
+ * vercel.app (static shell), not Render.
  */
 function getApiBaseUrl(): string {
   const trimmed = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-  if (import.meta.env.DEV) {
-    return trimmed
-  }
+
   if (typeof window !== 'undefined') {
     const host = window.location.hostname
     if (host.endsWith('vercel.app') || host.endsWith('vercel.dev')) {
+      if (trimmed && trimmed !== window.location.origin.replace(/\/$/, '')) {
+        return trimmed
+      }
       return DEFAULT_PROD_API
     }
     const origin = window.location.origin.replace(/\/$/, '')
@@ -58,6 +62,11 @@ function getApiBaseUrl(): string {
       return DEFAULT_PROD_API
     }
   }
+
+  if (import.meta.env.DEV) {
+    return trimmed
+  }
+
   if (trimmed) return trimmed
   return DEFAULT_PROD_API
 }
