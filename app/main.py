@@ -19,12 +19,15 @@ FRONTEND_DIST_DIR = PROJECT_DIR / 'frontend' / 'dist'
 FRONTEND_INDEX_PATH = FRONTEND_DIST_DIR / 'index.html'
 
 app = FastAPI(title='QA Real-Time Testing Dashboard')
+# allow_credentials=True is incompatible with allow_origins=['*'] (browser CORS rules).
+# The dashboard uses fetch() without cookies, so credentials can stay false and '*' works for any deploy preview.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS if CORS_ORIGINS else ['*'],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=['*'],
     allow_headers=['*'],
+    expose_headers=['X-Data-Source'],
 )
 
 app.mount('/static', StaticFiles(directory=BASE_DIR / 'static'), name='static')
