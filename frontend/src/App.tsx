@@ -40,14 +40,17 @@ const pct = (value: number, total: number): number => {
 const DEFAULT_PROD_API = 'https://realtime-testing-dashboard-api.onrender.com'
 
 /**
- * Production (`vite build` → `import.meta.env.PROD === true`): never return an empty base — empty
- * means relative `/api/...` and hits the static host (e.g. vercel.app), not Render.
- * Do not use `import.meta.env.DEV` for this; some CI/CD bundles have been observed where DEV is
- * still true and `trimmed` is empty → same-origin bug.
+ * Empty base ⇒ relative `/api/...` ⇒ hits the deploy host (vercel.app), not Render.
+ *
+ * Do NOT use `import.meta.env.PROD`: Vite sets PROD only when `mode === 'production'`.
+ * `vite build --mode staging` (and similar) leaves PROD false while still being a production
+ * build — same bug as DEV true → empty `trimmed` → vercel.app/api/summary.
+ *
+ * Only `vite` dev server uses `MODE === 'development'` + empty base for the local proxy.
  */
 function getApiBaseUrl(): string {
   const trimmed = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-  if (!import.meta.env.PROD) {
+  if (import.meta.env.MODE === 'development') {
     return trimmed
   }
   if (typeof window !== 'undefined' && trimmed && trimmed === window.location.origin.replace(/\/$/, '')) {
