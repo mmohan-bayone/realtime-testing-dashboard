@@ -1,7 +1,7 @@
 import asyncio
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -58,8 +58,11 @@ def config():
 
 
 @app.get('/api/summary')
-def summary(db: Session = Depends(get_db)):
-    return repository.get_summary(db)
+def summary(response: Response, db: Session = Depends(get_db)):
+    data = repository.get_summary(db)
+    # Helps verify in DevTools → Network → Headers that this JSON is from the real API + current mode.
+    response.headers['X-Data-Source'] = DATA_SOURCE
+    return data
 
 
 @app.get('/api/runs', response_model=list[schemas.TestRunResponse])

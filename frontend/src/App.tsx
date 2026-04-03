@@ -319,6 +319,11 @@ function App() {
         <article className="card">
           <div className="card-title">Live Execution Feed</div>
           <div className="meta">Last refreshed: {new Date(summary.generated_at).toLocaleString()}</div>
+          <div className="meta" style={{ marginTop: 6, lineHeight: 1.4 }}>
+            Numbers match <code>GET {getApiBaseUrl()}/api/summary</code> (Network → Preview). Rows in Preview = rows in
+            the API database; truncate Postgres on Render or use <code>DATA_SOURCE=github</code> to turn off demo
+            writes.
+          </div>
           <table>
             <thead>
               <tr>
