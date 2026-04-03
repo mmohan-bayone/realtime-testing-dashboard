@@ -168,13 +168,17 @@ function App() {
 
       socket.onopen = () => {
         setConnectionStatus('Live')
+        // Re-fetch so the UI matches GET /api/summary; do not trust WS `initial` alone (can race / disagree with REST).
+        void loadSummary()
       }
 
       socket.onmessage = (event) => {
-        const payload = JSON.parse(event.data) as { summary?: Summary }
-        if (payload.summary) {
-          setSummary(payload.summary)
+        const payload = JSON.parse(event.data) as { event?: string; summary?: Summary }
+        // `initial` duplicates GET /api/summary and has been observed to overwrite a correct REST response with stale data.
+        if (payload.event === 'initial' || !payload.summary) {
+          return
         }
+        setSummary(payload.summary)
       }
 
       socket.onclose = () => {
@@ -191,7 +195,7 @@ function App() {
       }
       socket?.close()
     }
-  }, [])
+  }, [loadSummary])
 
   const createDemoRun = useCallback(async () => {
     await fetch(apiUrl('/api/runs'), {
