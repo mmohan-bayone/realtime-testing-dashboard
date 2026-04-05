@@ -1,0 +1,30 @@
+# Paste into .github/workflows/*.yml (adjust paths and how you build payload.json).
+#
+# This uses curl multipart directly so the API always receives `report_zip` (not JSON-only).
+# Your log showed: "JSON-only run - no multipart" — that means the publish script never sent FormData.
+
+  - name: Publish results to dashboard (metrics + HTML zip)
+    if: always()   # optional: run even when tests fail, if playwright-report exists
+    env:
+      DASHBOARD_URL: https://realtime-testing-dashboard-api.onrender.com
+      DASHBOARD_INGEST_TOKEN: ${{ secrets.DASHBOARD_INGEST_TOKEN }}
+    run: |
+      set -euo pipefail
+      test -d playwright-report || { echo "Missing playwright-report/"; exit 1; }
+      ( cd playwright-report && zip -qr ../report.zip . )
+      test -s report.zip || { echo "report.zip is empty"; exit 1; }
+
+      # You must already have payload.json (same shape as POST /api/ingest/github-actions/run).
+      # If you build it with Node, run that step before this one.
+      test -f payload.json || { echo "Missing payload.json"; exit 1; }
+
+      curl -f -sS -D /tmp/dashboard-headers.txt -o /tmp/dashboard-body.json \
+        -X POST "${DASHBOARD_URL}/api/ingest/github-actions/run-with-report" \
+        -H "X-Ingest-Token: ${DASHBOARD_INGEST_TOKEN}" \
+        -F "payload=@payload.json;type=application/json" \
+        -F "report_zip=@report.zip;type=application/zip"
+
+      echo "--- response headers ---"
+      cat /tmp/dashboard-headers.txt
+      echo "--- has_html_report_zip ---"
+      python3 -c "import json,sys; d=json.load(open('/tmp/dashboard-body.json')); print(d.get('has_html_report_zip')); sys.exit(0 if d.get('has_html_report_zip') else 1)"
