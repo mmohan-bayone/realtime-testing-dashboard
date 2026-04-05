@@ -1,12 +1,12 @@
 import asyncio
 from pathlib import Path
-from typing import Optional
 
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Response, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from pydantic import ValidationError
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
@@ -149,34 +149,46 @@ async def ingest_github_actions_run(
 
 @app.post('/api/ingest/github-actions/run-with-report', response_model=schemas.TestRunResponse)
 async def ingest_github_actions_run_with_report(
+    request: Request,
     response: Response,
     db: Session = Depends(get_db),
     x_ingest_token: str = Header('', alias='X-Ingest-Token'),
-    payload: str = Form(..., description='JSON body matching TestRunCreate (same as /run ingest).'),
-    report_zip: Optional[UploadFile] = File(
-        None,
-        description='Zip of the HTML report folder (e.g. Playwright playwright-report/).',
-    ),
 ):
     """
     Same as JSON ingest, plus an optional `report_zip` file part.
     Use this from CI when the HTML report is a directory (Playwright); GitHub artifact downloads are not public URLs.
 
-    Multipart part names must be exactly `payload` (string JSON) and `report_zip` (file). Any other file field name is ignored.
-    Check response header `X-Ingest-Report-Zip-Bytes` (or JSON `has_html_report_zip`) to confirm the zip was stored.
+    Multipart parts: `payload` (JSON string **or** file upload like `curl -F payload=@payload.json`) and optional `report_zip`.
+
+    `curl -F payload=@file.json` sends a file part; we parse it manually so FastAPI does not return 422 for type coercion.
     """
     _require_ingest_token(x_ingest_token)
+    form = await request.form()
+    payload_raw = form.get('payload')
+    if payload_raw is None:
+        raise HTTPException(status_code=422, detail='Missing form field "payload"')
+
+    if isinstance(payload_raw, UploadFile):
+        b = await payload_raw.read()
+        try:
+            payload_text = b.decode('utf-8-sig')
+        except UnicodeDecodeError as e:
+            raise HTTPException(status_code=422, detail=f'payload file is not valid UTF-8: {e}') from e
+    else:
+        payload_text = str(payload_raw)
+
     try:
-        data = schemas.TestRunCreate.model_validate_json(payload)
-    except Exception as e:
-        raise HTTPException(status_code=422, detail=f'Invalid payload JSON: {e}') from e
+        data = schemas.TestRunCreate.model_validate_json(payload_text)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors()) from e
 
     zip_bytes = None
-    if report_zip is not None:
-        raw = await report_zip.read()
+    report_raw = form.get('report_zip')
+    if isinstance(report_raw, UploadFile):
+        raw = await report_raw.read()
         if raw:
             zip_bytes = raw
-        elif getattr(report_zip, 'filename', None):
+        elif getattr(report_raw, 'filename', None):
             raise HTTPException(
                 status_code=400,
                 detail='report_zip part was present but empty. Fix the path to your zip or the zip command in CI.',
