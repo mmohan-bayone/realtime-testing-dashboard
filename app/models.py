@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -18,12 +18,19 @@ class TestRun(Base):
     # Optional CI HTML report: public URL and/or single-file HTML body (served via GET /api/runs/{id}/html-report)
     html_report_url = Column(String, nullable=True)
     html_report_html = Column(Text, nullable=True)
+    # Zipped multi-file HTML report (e.g. Playwright playwright-report/ folder).
+    html_report_zip = Column(LargeBinary, nullable=True)
+    html_report_index_path = Column(String, nullable=True)
 
     test_cases = relationship('TestCaseResult', back_populates='run', cascade='all, delete-orphan')
 
     @property
     def has_html_report_inline(self) -> bool:
         return bool(self.html_report_html)
+
+    @property
+    def has_html_report_zip(self) -> bool:
+        return bool(self.html_report_zip)
 
 
 class TestCaseResult(Base):

@@ -54,6 +54,8 @@ class TestRunResponse(BaseModel):
     test_cases: list[TestCaseResponse]
     html_report_url: Optional[str] = None
     has_html_report_inline: bool = False
+    has_html_report_zip: bool = False
+    html_report_index_path: Optional[str] = None
 
     class Config:
         from_attributes = True

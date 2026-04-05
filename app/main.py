@@ -1,13 +1,17 @@
 import asyncio
 from pathlib import Path
+from typing import Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, WebSocket, WebSocketDisconnect
+from urllib.parse import quote
+
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from . import repository, schemas
+from .report_zip import ReportZipError, read_member
 from .database import Base, engine, get_db, SessionLocal
 from .models import TestCaseResult
 from .realtime import ConnectionManager
@@ -73,11 +77,29 @@ def runs(limit: int = 10, db: Session = Depends(get_db)):
     return repository.get_runs(db, limit)
 
 
+@app.get('/api/runs/{run_id}/report/{file_path:path}')
+def run_report_file(run_id: int, file_path: str, db: Session = Depends(get_db)):
+    """Serves files from a CI-uploaded Playwright-style report ZIP (multi-file HTML report)."""
+    run = repository.get_run(db, run_id)
+    if not run or not run.html_report_zip:
+        raise HTTPException(status_code=404, detail='No report archive for this run')
+    try:
+        body, mime = read_member(run.html_report_zip, file_path)
+    except ReportZipError:
+        raise HTTPException(status_code=404, detail='Report file not found') from None
+    return Response(content=body, media_type=mime)
+
+
 @app.get('/api/runs/{run_id}/html-report', response_class=HTMLResponse)
 def run_html_report(run_id: int, db: Session = Depends(get_db)):
-    """Serves CI-uploaded single-file HTML (e.g. pytest-html). Not used when only html_report_url is set."""
+    """Single-file HTML body, or redirect to bundled report index inside a ZIP."""
     run = repository.get_run(db, run_id)
-    if not run or not run.html_report_html:
+    if not run:
+        raise HTTPException(status_code=404, detail='Run not found')
+    if run.html_report_zip and run.html_report_index_path:
+        parts = [quote(seg, safe='') for seg in run.html_report_index_path.split('/')]
+        return RedirectResponse(url=f'/api/runs/{run_id}/report/{"/".join(parts)}', status_code=307)
+    if not run.html_report_html:
         raise HTTPException(status_code=404, detail='No inline HTML report for this run')
     return HTMLResponse(content=run.html_report_html, media_type='text/html; charset=utf-8')
 
@@ -106,18 +128,56 @@ async def update_case(case_id: int, payload: dict, db: Session = Depends(get_db)
     return {'message': 'updated', 'run_id': run.id}
 
 
+def _require_ingest_token(x_ingest_token: str) -> None:
+    if not GITHUB_ACTIONS_INGEST_TOKEN:
+        raise HTTPException(status_code=503, detail='Ingestion not configured')
+    if x_ingest_token != GITHUB_ACTIONS_INGEST_TOKEN:
+        raise HTTPException(status_code=401, detail='Unauthorized')
+
+
 @app.post('/api/ingest/github-actions/run', response_model=schemas.TestRunResponse)
 async def ingest_github_actions_run(
     payload: schemas.TestRunCreate,
     db: Session = Depends(get_db),
     x_ingest_token: str = Header('', alias='X-Ingest-Token'),
 ):
-    if not GITHUB_ACTIONS_INGEST_TOKEN:
-        raise HTTPException(status_code=503, detail='Ingestion not configured')
-    if x_ingest_token != GITHUB_ACTIONS_INGEST_TOKEN:
-        raise HTTPException(status_code=401, detail='Unauthorized')
-
+    _require_ingest_token(x_ingest_token)
     run = repository.create_run(db, payload)
+    await manager.broadcast({'event': 'github_ingest', 'summary': repository.get_summary(db), 'run_id': run.id})
+    return run
+
+
+@app.post('/api/ingest/github-actions/run-with-report', response_model=schemas.TestRunResponse)
+async def ingest_github_actions_run_with_report(
+    db: Session = Depends(get_db),
+    x_ingest_token: str = Header('', alias='X-Ingest-Token'),
+    payload: str = Form(..., description='JSON body matching TestRunCreate (same as /run ingest).'),
+    report_zip: Optional[UploadFile] = File(
+        None,
+        description='Zip of the HTML report folder (e.g. Playwright playwright-report/).',
+    ),
+):
+    """
+    Same as JSON ingest, plus an optional `report_zip` file part.
+    Use this from CI when the HTML report is a directory (Playwright); GitHub artifact downloads are not public URLs.
+    """
+    _require_ingest_token(x_ingest_token)
+    try:
+        data = schemas.TestRunCreate.model_validate_json(payload)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f'Invalid payload JSON: {e}') from e
+
+    zip_bytes = None
+    if report_zip is not None:
+        raw = await report_zip.read()
+        if raw:
+            zip_bytes = raw
+
+    try:
+        run = repository.create_run(db, data, report_zip=zip_bytes)
+    except ReportZipError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
     await manager.broadcast({'event': 'github_ingest', 'summary': repository.get_summary(db), 'run_id': run.id})
     return run
 

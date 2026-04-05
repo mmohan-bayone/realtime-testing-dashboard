@@ -193,11 +193,24 @@ jobs:
             --data-binary @payload.json
 ```
 
+Example: zip the Playwright HTML output and send it with the same JSON payload (so the dashboard can render the full report):
+
+```bash
+# From the repo root after tests, with playwright-report/ on disk:
+( cd playwright-report && zip -qr ../report.zip . )
+curl -sS -X POST "$DASHBOARD_URL/api/ingest/github-actions/run-with-report" \
+  -H "X-Ingest-Token: $DASHBOARD_INGEST_TOKEN" \
+  -F "payload=@payload.json;type=application/json" \
+  -F "report_zip=@report.zip;type=application/zip"
+```
+
 Notes:
 - In `DATA_SOURCE=github` mode, the UI demo button is hidden and `POST /api/runs` is disabled; ingestion must go through `/api/ingest/github-actions/run`.
 - You can map your real test framework output into the `test_cases` array (name/module/status/duration/optional defect_id).
-- **HTML test reports (optional):** include either `html_report_url` (public HTTPS URL to your report) and/or `html_report_html` (single-file HTML as a string) in the same JSON body as the ingest `POST`. The dashboard shows an embedded report plus an “Open in new tab” link; inline HTML is served from `GET /api/runs/{id}/html-report`. Multi-file reports (e.g. Playwright’s default `playwright-report/` folder) are usually published to static hosting and referenced with `html_report_url`; single-file tools (e.g. pytest-html) can use `html_report_html`. The uploader script supports `HTML_REPORT_URL` and `HTML_REPORT_FILE` env vars (see [`examples/playwright-report-to-dashboard.mjs`](examples/playwright-report-to-dashboard.mjs)).
-- **Playwright JSON reports** nest tests under `suite.specs[].tests[]` (not only `suite.tests[]`). Use the uploader in [`examples/playwright-report-to-dashboard.mjs`](examples/playwright-report-to-dashboard.mjs), which parses both shapes. If CI logs show `0 test case(s)` but tests ran, copy the latest script into your Playwright repo and re-run the workflow.
+- **HTML test reports (Playwright / multi-file):** GitHub Actions **artifacts are zips, not a public URL**, so the dashboard cannot load them unless you **upload the report** to the API. Use `POST /api/ingest/github-actions/run-with-report` with `multipart/form-data`: form field `payload` = same JSON as today (`TestRunCreate`), and optional file part `report_zip` = a zip of the HTML report folder (e.g. zip the contents of `playwright-report/`). The API stores the zip and serves `GET /api/runs/{id}/report/...` for the embedded viewer. Requires `python-multipart` on the server (listed in [`requirements.txt`](requirements.txt)).
+- **HTML without a zip:** you can still send `html_report_url` (public HTTPS) and/or `html_report_html` (single file) on the original JSON endpoint `POST /api/ingest/github-actions/run`.
+- **Playwright helper:** [`examples/playwright-report-to-dashboard.mjs`](examples/playwright-report-to-dashboard.mjs) reads the JSON report for metrics and, if `playwright-report/` exists, runs `zip` and posts to `run-with-report` automatically. Set `PLAYWRIGHT_HTML_REPORT_DIR` if the folder is not `./playwright-report`, or `DASHBOARD_SKIP_HTML_ZIP=1` to send JSON only. Optional: `HTML_REPORT_URL`, `HTML_REPORT_FILE`.
+- **Playwright JSON reports** nest tests under `suite.specs[].tests[]` (not only `suite.tests[]`). That script parses both shapes. If CI logs show `0 test case(s)` but tests ran, ensure `outputFile` for the JSON reporter points at the file you pass to the script.
 - With `DATA_SOURCE=github`, the API **lists CI runs first** in the live feed (so old seeded rows do not stay at the top). To remove seeded/demo rows entirely, truncate tables in Postgres (see Render Postgres shell / SQL): `TRUNCATE test_case_results, test_runs RESTART IDENTITY CASCADE;`
 - **WebSocket “Reconnecting”** on Vercel: set `CORS_ORIGINS` to your exact Vercel URL (including `https://`). Redeploy the API after changing it.
 

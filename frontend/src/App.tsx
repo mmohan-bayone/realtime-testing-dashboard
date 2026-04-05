@@ -29,6 +29,8 @@ type Summary = {
     total: number
     html_report_url?: string | null
     has_html_report_inline?: boolean
+    has_html_report_zip?: boolean
+    html_report_index_path?: string | null
   }>
   generated_at: string
 }
@@ -65,6 +67,28 @@ const apiUrl = (path: string): string => {
   const base = getApiBaseUrl()
   if (!base) return path
   return `${base}${path}`
+}
+
+/** Primary URL for viewing a run's HTML report (ZIP bundle, single-file, or external link). */
+function reportViewerUrl(run: {
+  id: number
+  html_report_url?: string | null
+  has_html_report_inline?: boolean
+  has_html_report_zip?: boolean
+  html_report_index_path?: string | null
+}): string | null {
+  if (run.has_html_report_zip && run.html_report_index_path) {
+    const path = run.html_report_index_path
+      .split('/')
+      .map((seg) => encodeURIComponent(seg))
+      .join('/')
+    return apiUrl(`/api/runs/${run.id}/report/${path}`)
+  }
+  if (run.has_html_report_inline) {
+    return apiUrl(`/api/runs/${run.id}/html-report`)
+  }
+  const u = (run.html_report_url ?? '').trim()
+  return u.length > 0 ? u : null
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -217,8 +241,7 @@ function App() {
   const runsWithReport = useMemo(() => {
     if (!summary) return []
     return summary.latest_runs.filter((r) => {
-      const url = (r.html_report_url ?? '').trim()
-      return url.length > 0 || Boolean(r.has_html_report_inline)
+      return reportViewerUrl(r) !== null
     })
   }, [summary])
 
@@ -242,17 +265,9 @@ function App() {
     })
   }, [runsWithReport])
 
-  const reportFrameSrc = selectedReportRun
-    ? selectedReportRun.has_html_report_inline
-      ? apiUrl(`/api/runs/${selectedReportRun.id}/html-report`)
-      : (selectedReportRun.html_report_url ?? '').trim() || null
-    : null
+  const reportFrameSrc = selectedReportRun ? reportViewerUrl(selectedReportRun) : null
 
-  const reportOpenHref = selectedReportRun
-    ? selectedReportRun.has_html_report_inline
-      ? apiUrl(`/api/runs/${selectedReportRun.id}/html-report`)
-      : (selectedReportRun.html_report_url ?? '').trim() || null
-    : null
+  const reportOpenHref = selectedReportRun ? reportViewerUrl(selectedReportRun) : null
 
   if (!summary && fetchError) {
     return (
@@ -325,7 +340,7 @@ function App() {
                   {runsWithReport.map((r) => (
                     <option key={r.id} value={r.id}>
                       #{r.id} · {r.suite_name} · {r.build_version.slice(0, 7)}
-                      {r.has_html_report_inline ? ' (stored)' : ''}
+                      {r.has_html_report_zip ? ' (zip)' : r.has_html_report_inline ? ' (stored)' : ''}
                     </option>
                   ))}
                 </select>
@@ -333,7 +348,11 @@ function App() {
             ) : (
               <div className="meta">
                 Run #{selectedReportRun.id} · {selectedReportRun.suite_name} · {selectedReportRun.build_version}
-                {selectedReportRun.has_html_report_inline ? ' · stored on API' : ''}
+                {selectedReportRun.has_html_report_zip
+                  ? ' · HTML report (zip) on API'
+                  : selectedReportRun.has_html_report_inline
+                    ? ' · stored on API'
+                    : ''}
               </div>
             )}
             {reportOpenHref ? (
@@ -426,9 +445,7 @@ function App() {
               {summary.latest_runs.map((run) => {
                 const progress = pct(run.passed + run.failed, run.total)
                 const cssClass = run.status === 'FAILED' || run.status === 'BLOCKED' ? 'danger' : run.status === 'PASSED' ? 'success' : 'info'
-                const reportHref = run.has_html_report_inline
-                  ? apiUrl(`/api/runs/${run.id}/html-report`)
-                  : (run.html_report_url ?? '').trim() || null
+                const reportHref = reportViewerUrl(run)
                 return (
                   <tr key={run.id}>
                     <td>{run.suite_name}</td>

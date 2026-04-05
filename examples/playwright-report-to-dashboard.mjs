@@ -1,13 +1,19 @@
 #!/usr/bin/env node
 /**
- * Reads Playwright JSON report and POSTs to /api/ingest/github-actions/run
+ * Reads Playwright JSON report and POSTs to the dashboard.
  *
  * Playwright JSON format nests tests under `specs` (suite.specs[].tests[]).
  * Older formats may use suite.tests[] directly — we handle both.
+ *
+ * If `playwright-report/` exists (or PLAYWRIGHT_HTML_REPORT_DIR), it is zipped and sent to
+ * POST /api/ingest/github-actions/run-with-report so the full HTML UI appears on the dashboard.
+ * GitHub Actions artifacts alone are not a public URL — you must upload the folder here.
  */
 
-import { readFileSync, statSync } from 'node:fs'
-import { basename } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { existsSync, readFileSync, statSync, unlinkSync } from 'node:fs'
+import { basename, join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 
 const dashboardUrl = (process.env.DASHBOARD_URL || '').replace(/\/$/, '')
 const token = process.env.DASHBOARD_INGEST_TOKEN || ''
@@ -75,7 +81,16 @@ function shouldRetryHttp(status) {
   return status === 502 || status === 503 || status === 504
 }
 
-async function postIngest(url, body) {
+/** Requires `zip` on PATH (standard on GitHub Actions ubuntu-latest). */
+function zipReportDirectory(absDir) {
+  const out = join(tmpdir(), `pw-report-${process.pid}-${Date.now()}.zip`)
+  execFileSync('zip', ['-qr', out, '.'], { cwd: absDir })
+  const buf = readFileSync(out)
+  unlinkSync(out)
+  return buf
+}
+
+async function postJson(url, body) {
   const signal =
     typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
       ? AbortSignal.timeout(timeoutMs)
@@ -100,11 +115,45 @@ async function postIngest(url, body) {
   return text
 }
 
-async function postWithRetries(url, body) {
+async function postMultipart(url, body, zipBuffer) {
+  const signal =
+    typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+      ? AbortSignal.timeout(timeoutMs)
+      : undefined
+
+  const form = new FormData()
+  form.append('payload', JSON.stringify(body))
+  form.append('report_zip', new Blob([zipBuffer], { type: 'application/zip' }), 'playwright-report.zip')
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'X-Ingest-Token': token,
+    },
+    body: form,
+    signal,
+  })
+
+  const text = await res.text()
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}: ${text}`)
+    err.status = res.status
+    throw err
+  }
+  return text
+}
+
+async function postWithRetries(body, zipBuf) {
+  const urlJson = `${dashboardUrl}/api/ingest/github-actions/run`
+  const urlMultipart = `${dashboardUrl}/api/ingest/github-actions/run-with-report`
+
   let lastErr
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      return await postIngest(url, body)
+      if (zipBuf && zipBuf.length > 0) {
+        return await postMultipart(urlMultipart, body, zipBuf)
+      }
+      return await postJson(urlJson, body)
     } catch (e) {
       lastErr = e
       const aborted =
@@ -183,13 +232,11 @@ async function main() {
     test_cases: testCases,
   }
 
-  // Optional: public URL to the HTML report (e.g. GitHub Pages or signed artifact URL).
   const reportUrl = (process.env.HTML_REPORT_URL || '').trim()
   if (reportUrl) {
     body.html_report_url = reportUrl
   }
 
-  // Optional: single-file HTML body for inline dashboard embed (e.g. cat report.html).
   const htmlPath = (process.env.HTML_REPORT_FILE || '').trim()
   if (htmlPath) {
     try {
@@ -202,8 +249,29 @@ async function main() {
     }
   }
 
-  const url = `${dashboardUrl}/api/ingest/github-actions/run`
-  const out = await postWithRetries(url, body)
+  let zipBuf = null
+  if (process.env.DASHBOARD_SKIP_HTML_ZIP !== '1') {
+    const htmlDir = process.env.PLAYWRIGHT_HTML_REPORT_DIR
+      ? resolve(process.env.PLAYWRIGHT_HTML_REPORT_DIR)
+      : resolve(process.cwd(), 'playwright-report')
+    try {
+      if (existsSync(htmlDir) && statSync(htmlDir).isDirectory()) {
+        zipBuf = zipReportDirectory(htmlDir)
+        console.log(
+          `[dashboard] Packed HTML report from ${htmlDir} (${zipBuf.length} bytes). Uploading with test results.`,
+        )
+      } else {
+        console.warn(
+          `[dashboard] No directory at ${htmlDir} — skipping HTML zip. ` +
+            'Set PLAYWRIGHT_HTML_REPORT_DIR or generate playwright-report before upload.',
+        )
+      }
+    } catch (e) {
+      console.warn('[dashboard] Could not zip HTML report (install `zip` CLI):', e.message || e)
+    }
+  }
+
+  const out = await postWithRetries(body, zipBuf)
   console.log(out)
 }
 

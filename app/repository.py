@@ -10,7 +10,13 @@ from .settings import DATA_SOURCE
 FINAL_STATUSES = {'PASSED', 'FAILED', 'BLOCKED', 'SKIPPED'}
 
 
-def create_run(db: Session, payload):
+def create_run(db: Session, payload, report_zip: Optional[bytes] = None):
+    index_path = None
+    if report_zip is not None:
+        from .report_zip import validate_report_zip_bytes
+
+        index_path = validate_report_zip_bytes(report_zip)
+
     run = TestRun(
         suite_name=payload.suite_name,
         environment=payload.environment,
@@ -18,6 +24,8 @@ def create_run(db: Session, payload):
         status='RUNNING',
         html_report_url=payload.html_report_url,
         html_report_html=payload.html_report_html,
+        html_report_zip=report_zip,
+        html_report_index_path=index_path,
     )
     db.add(run)
     db.flush()
@@ -150,6 +158,8 @@ def get_summary(db: Session):
                 'total': len(run.test_cases),
                 'html_report_url': run.html_report_url,
                 'has_html_report_inline': bool(run.html_report_html),
+                'has_html_report_zip': bool(run.html_report_zip),
+                'html_report_index_path': run.html_report_index_path,
             }
         )
 
