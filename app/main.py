@@ -149,6 +149,7 @@ async def ingest_github_actions_run(
 
 @app.post('/api/ingest/github-actions/run-with-report', response_model=schemas.TestRunResponse)
 async def ingest_github_actions_run_with_report(
+    response: Response,
     db: Session = Depends(get_db),
     x_ingest_token: str = Header('', alias='X-Ingest-Token'),
     payload: str = Form(..., description='JSON body matching TestRunCreate (same as /run ingest).'),
@@ -160,6 +161,9 @@ async def ingest_github_actions_run_with_report(
     """
     Same as JSON ingest, plus an optional `report_zip` file part.
     Use this from CI when the HTML report is a directory (Playwright); GitHub artifact downloads are not public URLs.
+
+    Multipart part names must be exactly `payload` (string JSON) and `report_zip` (file). Any other file field name is ignored.
+    Check response header `X-Ingest-Report-Zip-Bytes` (or JSON `has_html_report_zip`) to confirm the zip was stored.
     """
     _require_ingest_token(x_ingest_token)
     try:
@@ -172,11 +176,19 @@ async def ingest_github_actions_run_with_report(
         raw = await report_zip.read()
         if raw:
             zip_bytes = raw
+        elif getattr(report_zip, 'filename', None):
+            raise HTTPException(
+                status_code=400,
+                detail='report_zip part was present but empty. Fix the path to your zip or the zip command in CI.',
+            )
 
     try:
         run = repository.create_run(db, data, report_zip=zip_bytes)
     except ReportZipError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+    stored = len(run.html_report_zip) if run.html_report_zip else 0
+    response.headers['X-Ingest-Report-Zip-Bytes'] = str(stored)
 
     await manager.broadcast({'event': 'github_ingest', 'summary': repository.get_summary(db), 'run_id': run.id})
     return run

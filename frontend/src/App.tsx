@@ -467,6 +467,16 @@ function App() {
               })}
             </tbody>
           </table>
+          {dataSource === 'github' &&
+          summary.latest_runs.length > 0 &&
+          summary.latest_runs.every((r) => !reportViewerUrl(r)) ? (
+            <p className="meta" style={{ marginTop: 14, lineHeight: 1.5 }}>
+              HTML stays empty until your <strong>Playwright / CI workflow</strong> uploads the report: use{' '}
+              <code>POST {getApiBaseUrl()}/api/ingest/github-actions/run-with-report</code> with a{' '}
+              <code>report_zip</code> part (folder zipped as in the README). Pushing this dashboard repo does not send
+              GitHub artifacts to the API.
+            </p>
+          ) : null}
         </article>
       </section>
 
