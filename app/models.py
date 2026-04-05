@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -15,8 +15,15 @@ class TestRun(Base):
     status = Column(String, default='RUNNING', nullable=False)
     started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     completed_at = Column(DateTime, nullable=True)
+    # Optional CI HTML report: public URL and/or single-file HTML body (served via GET /api/runs/{id}/html-report)
+    html_report_url = Column(String, nullable=True)
+    html_report_html = Column(Text, nullable=True)
 
     test_cases = relationship('TestCaseResult', back_populates='run', cascade='all, delete-orphan')
+
+    @property
+    def has_html_report_inline(self) -> bool:
+        return bool(self.html_report_html)
 
 
 class TestCaseResult(Base):

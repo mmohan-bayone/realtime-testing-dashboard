@@ -73,6 +73,15 @@ def runs(limit: int = 10, db: Session = Depends(get_db)):
     return repository.get_runs(db, limit)
 
 
+@app.get('/api/runs/{run_id}/html-report', response_class=HTMLResponse)
+def run_html_report(run_id: int, db: Session = Depends(get_db)):
+    """Serves CI-uploaded single-file HTML (e.g. pytest-html). Not used when only html_report_url is set."""
+    run = repository.get_run(db, run_id)
+    if not run or not run.html_report_html:
+        raise HTTPException(status_code=404, detail='No inline HTML report for this run')
+    return HTMLResponse(content=run.html_report_html, media_type='text/html; charset=utf-8')
+
+
 @app.post('/api/runs', response_model=schemas.TestRunResponse)
 async def create_run(payload: schemas.TestRunCreate, db: Session = Depends(get_db)):
     if DATA_SOURCE == 'github':

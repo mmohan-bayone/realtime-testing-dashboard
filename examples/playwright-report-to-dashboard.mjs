@@ -183,6 +183,25 @@ async function main() {
     test_cases: testCases,
   }
 
+  // Optional: public URL to the HTML report (e.g. GitHub Pages or signed artifact URL).
+  const reportUrl = (process.env.HTML_REPORT_URL || '').trim()
+  if (reportUrl) {
+    body.html_report_url = reportUrl
+  }
+
+  // Optional: single-file HTML body for inline dashboard embed (e.g. cat report.html).
+  const htmlPath = (process.env.HTML_REPORT_FILE || '').trim()
+  if (htmlPath) {
+    try {
+      const htmlSt = statSync(htmlPath)
+      if (htmlSt.isFile() && htmlSt.size > 0) {
+        body.html_report_html = readFileSync(htmlPath, 'utf8')
+      }
+    } catch {
+      console.warn(`[dashboard] HTML_REPORT_FILE set but not readable: ${htmlPath}`)
+    }
+  }
+
   const url = `${dashboardUrl}/api/ingest/github-actions/run`
   const out = await postWithRetries(url, body)
   console.log(out)

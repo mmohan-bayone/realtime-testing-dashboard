@@ -16,6 +16,8 @@ def create_run(db: Session, payload):
         environment=payload.environment,
         build_version=payload.build_version,
         status='RUNNING',
+        html_report_url=payload.html_report_url,
+        html_report_html=payload.html_report_html,
     )
     db.add(run)
     db.flush()
@@ -146,6 +148,8 @@ def get_summary(db: Session):
                 'passed': passed,
                 'failed': failed,
                 'total': len(run.test_cases),
+                'html_report_url': run.html_report_url,
+                'has_html_report_inline': bool(run.html_report_html),
             }
         )
 

@@ -153,3 +153,68 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+.html-report-card {
+  margin-bottom: 16px;
+}
+
+.html-report-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  margin-bottom: 8px;
+}
+
+.html-report-select-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.html-report-select {
+  background: var(--panel-soft);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  max-width: min(100%, 420px);
+}
+
+.html-report-open {
+  color: var(--info);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.html-report-open:hover {
+  text-decoration: underline;
+}
+
+.html-report-link {
+  color: var(--info);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.html-report-link:hover {
+  text-decoration: underline;
+}
+
+.html-report-frame-wrap {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--panel-soft);
+  min-height: 480px;
+}
+
+.html-report-frame {
+  display: block;
+  width: 100%;
+  min-height: 480px;
+  border: 0;
+  background: #fff;
+}

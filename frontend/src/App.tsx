@@ -27,6 +27,8 @@ type Summary = {
     passed: number
     failed: number
     total: number
+    html_report_url?: string | null
+    has_html_report_inline?: boolean
   }>
   generated_at: string
 }
@@ -115,6 +117,7 @@ function App() {
   const [connectionStatus, setConnectionStatus] = useState('Connecting...')
   const reconnectTimerRef = useRef<number | null>(null)
   const [dataSource, setDataSource] = useState<string>('unknown')
+  const [selectedReportRunId, setSelectedReportRunId] = useState<number | null>(null)
 
   const loadSummary = useCallback(async () => {
     try {
@@ -211,6 +214,46 @@ function App() {
     [summary],
   )
 
+  const runsWithReport = useMemo(() => {
+    if (!summary) return []
+    return summary.latest_runs.filter((r) => {
+      const url = (r.html_report_url ?? '').trim()
+      return url.length > 0 || Boolean(r.has_html_report_inline)
+    })
+  }, [summary])
+
+  const selectedReportRun = useMemo(() => {
+    if (runsWithReport.length === 0) return null
+    const picked =
+      selectedReportRunId !== null
+        ? runsWithReport.find((r) => r.id === selectedReportRunId)
+        : undefined
+    return picked ?? runsWithReport[0]
+  }, [runsWithReport, selectedReportRunId])
+
+  useEffect(() => {
+    if (runsWithReport.length === 0) {
+      setSelectedReportRunId(null)
+      return
+    }
+    setSelectedReportRunId((prev) => {
+      if (prev !== null && runsWithReport.some((r) => r.id === prev)) return prev
+      return runsWithReport[0].id
+    })
+  }, [runsWithReport])
+
+  const reportFrameSrc = selectedReportRun
+    ? selectedReportRun.has_html_report_inline
+      ? apiUrl(`/api/runs/${selectedReportRun.id}/html-report`)
+      : (selectedReportRun.html_report_url ?? '').trim() || null
+    : null
+
+  const reportOpenHref = selectedReportRun
+    ? selectedReportRun.has_html_report_inline
+      ? apiUrl(`/api/runs/${selectedReportRun.id}/html-report`)
+      : (selectedReportRun.html_report_url ?? '').trim() || null
+    : null
+
   if (!summary && fetchError) {
     return (
       <div className="container">
@@ -266,6 +309,53 @@ function App() {
         <div className="kpi"><div className="label">Pass Rate</div><div className="value">{summary.totals.pass_rate}%</div></div>
         <div className="kpi"><div className="label">Open Defects</div><div className="value">{summary.totals.open_defects}</div></div>
       </section>
+
+      {selectedReportRun && reportFrameSrc ? (
+        <section className="card html-report-card">
+          <div className="card-title">CI HTML report</div>
+          <div className="html-report-toolbar">
+            {runsWithReport.length > 1 ? (
+              <label className="html-report-select-label">
+                <span className="meta">Run</span>
+                <select
+                  className="html-report-select"
+                  value={selectedReportRun.id}
+                  onChange={(e) => setSelectedReportRunId(Number(e.target.value))}
+                >
+                  {runsWithReport.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      #{r.id} · {r.suite_name} · {r.build_version.slice(0, 7)}
+                      {r.has_html_report_inline ? ' (stored)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <div className="meta">
+                Run #{selectedReportRun.id} · {selectedReportRun.suite_name} · {selectedReportRun.build_version}
+                {selectedReportRun.has_html_report_inline ? ' · stored on API' : ''}
+              </div>
+            )}
+            {reportOpenHref ? (
+              <a className="html-report-open" href={reportOpenHref} target="_blank" rel="noreferrer">
+                Open in new tab
+              </a>
+            ) : null}
+          </div>
+          <p className="meta" style={{ marginTop: 0 }}>
+            Embedded view may be blocked for some external URLs (X-Frame-Options). Use “Open in new tab” if the frame is
+            blank.
+          </p>
+          <div className="html-report-frame-wrap">
+            <iframe
+              title="CI HTML test report"
+              className="html-report-frame"
+              src={reportFrameSrc}
+              sandbox="allow-scripts allow-same-origin allow-popups allow-downloads"
+            />
+          </div>
+        </section>
+      ) : null}
 
       <section className="grid two">
         <article className="card">
@@ -329,12 +419,16 @@ function App() {
                 <th>Env</th>
                 <th>Status</th>
                 <th>Progress</th>
+                <th>HTML report</th>
               </tr>
             </thead>
             <tbody>
               {summary.latest_runs.map((run) => {
                 const progress = pct(run.passed + run.failed, run.total)
                 const cssClass = run.status === 'FAILED' || run.status === 'BLOCKED' ? 'danger' : run.status === 'PASSED' ? 'success' : 'info'
+                const reportHref = run.has_html_report_inline
+                  ? apiUrl(`/api/runs/${run.id}/html-report`)
+                  : (run.html_report_url ?? '').trim() || null
                 return (
                   <tr key={run.id}>
                     <td>{run.suite_name}</td>
@@ -342,6 +436,15 @@ function App() {
                     <td>{run.environment}</td>
                     <td><span className={`status ${run.status}`}>{run.status}</span></td>
                     <td><div className="bar"><div className={`fill ${cssClass}`} style={{ width: `${progress}%` }} /></div></td>
+                    <td>
+                      {reportHref ? (
+                        <a href={reportHref} target="_blank" rel="noreferrer" className="html-report-link">
+                          Open
+                        </a>
+                      ) : (
+                        <span className="meta">—</span>
+                      )}
+                    </td>
                   </tr>
                 )
               })}
