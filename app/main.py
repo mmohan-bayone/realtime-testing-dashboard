@@ -1,9 +1,12 @@
 import asyncio
+import inspect
 from pathlib import Path
+from typing import Optional
 
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import ValidationError
@@ -135,6 +138,46 @@ def _require_ingest_token(x_ingest_token: str) -> None:
         raise HTTPException(status_code=401, detail='Unauthorized')
 
 
+async def _multipart_json_text(part) -> str:
+    """Read JSON text from a multipart field: plain string, bytes, or file-like (UploadFile)."""
+    if isinstance(part, str):
+        return part
+    if isinstance(part, (bytes, bytearray)):
+        return bytes(part).decode('utf-8-sig')
+    read = getattr(part, 'read', None)
+    if callable(read):
+        chunk = read()
+        if inspect.isawaitable(chunk):
+            chunk = await chunk
+        if isinstance(chunk, str):
+            return chunk
+        if isinstance(chunk, (bytes, bytearray)):
+            return bytes(chunk).decode('utf-8-sig')
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            f'Unsupported "payload" part type {type(part).__name__!r}; '
+            'expected JSON text or a file upload (curl -F payload=@payload.json).'
+        ),
+    )
+
+
+async def _multipart_file_bytes(part) -> Optional[bytes]:
+    """Read raw bytes from an optional file part (report_zip)."""
+    if part is None:
+        return None
+    if isinstance(part, (bytes, bytearray)):
+        return bytes(part) if part else None
+    read = getattr(part, 'read', None)
+    if callable(read):
+        chunk = read()
+        if inspect.isawaitable(chunk):
+            chunk = await chunk
+        if isinstance(chunk, (bytes, bytearray)):
+            return bytes(chunk) if chunk else None
+    return None
+
+
 @app.post('/api/ingest/github-actions/run', response_model=schemas.TestRunResponse)
 async def ingest_github_actions_run(
     payload: schemas.TestRunCreate,
@@ -168,31 +211,27 @@ async def ingest_github_actions_run_with_report(
     if payload_raw is None:
         raise HTTPException(status_code=422, detail='Missing form field "payload"')
 
-    if isinstance(payload_raw, UploadFile):
-        b = await payload_raw.read()
-        try:
-            payload_text = b.decode('utf-8-sig')
-        except UnicodeDecodeError as e:
-            raise HTTPException(status_code=422, detail=f'payload file is not valid UTF-8: {e}') from e
-    else:
-        payload_text = str(payload_raw)
+    try:
+        payload_text = await _multipart_json_text(payload_raw)
+    except UnicodeDecodeError as e:
+        raise HTTPException(status_code=422, detail=f'payload file is not valid UTF-8: {e}') from e
 
     try:
         data = schemas.TestRunCreate.model_validate_json(payload_text)
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail=e.errors()) from e
+        raise HTTPException(status_code=422, detail=jsonable_encoder(e.errors())) from e
 
-    zip_bytes = None
     report_raw = form.get('report_zip')
-    if isinstance(report_raw, UploadFile):
-        raw = await report_raw.read()
-        if raw:
-            zip_bytes = raw
-        elif getattr(report_raw, 'filename', None):
+    zip_bytes = await _multipart_file_bytes(report_raw)
+    if zip_bytes is None and report_raw is not None:
+        fn = getattr(report_raw, 'filename', None)
+        if fn:
             raise HTTPException(
                 status_code=400,
                 detail='report_zip part was present but empty. Fix the path to your zip or the zip command in CI.',
             )
+
+    response.headers['X-Ingest-Api-Revision'] = '3'
 
     try:
         run = repository.create_run(db, data, report_zip=zip_bytes)
