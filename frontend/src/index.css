@@ -207,7 +207,7 @@ button {
   border: 1px solid var(--border);
   border-radius: 14px;
   overflow: hidden;
-  background: var(--panel-soft);
+  background: var(--bg);
   min-height: 480px;
 }
 
@@ -216,5 +216,6 @@ button {
   width: 100%;
   min-height: 480px;
   border: 0;
-  background: #fff;
+  background: var(--panel-soft);
+  color-scheme: dark;
 }

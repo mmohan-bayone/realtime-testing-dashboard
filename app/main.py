@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from . import repository, schemas
+from .html_theme import inject_dashboard_theme, inject_dashboard_theme_bytes
 from .report_zip import ReportZipError, read_member
 from .database import Base, engine, get_db, SessionLocal
 from .models import TestCaseResult
@@ -90,6 +91,7 @@ def run_report_file(run_id: int, file_path: str, db: Session = Depends(get_db)):
         body, mime = read_member(run.html_report_zip, file_path)
     except ReportZipError:
         raise HTTPException(status_code=404, detail='Report file not found') from None
+    body = inject_dashboard_theme_bytes(body, mime)
     return Response(content=body, media_type=mime)
 
 
@@ -104,7 +106,10 @@ def run_html_report(run_id: int, db: Session = Depends(get_db)):
         return RedirectResponse(url=f'/api/runs/{run_id}/report/{"/".join(parts)}', status_code=307)
     if not run.html_report_html:
         raise HTTPException(status_code=404, detail='No inline HTML report for this run')
-    return HTMLResponse(content=run.html_report_html, media_type='text/html; charset=utf-8')
+    return HTMLResponse(
+        content=inject_dashboard_theme(run.html_report_html),
+        media_type='text/html; charset=utf-8',
+    )
 
 
 @app.post('/api/runs', response_model=schemas.TestRunResponse)
