@@ -327,7 +327,7 @@ function App() {
 
       {selectedReportRun && reportFrameSrc ? (
         <section className="card html-report-card">
-          <div className="card-title">CI HTML report</div>
+          <div className="card-title">Latest CI Run View</div>
           <div className="html-report-toolbar">
             {runsWithReport.length > 1 ? (
               <label className="html-report-select-label">
